@@ -76,8 +76,27 @@ async def configure_workspace(
     for server_cfg in new_config.get("servers", {}).values():
         server_cfg.pop("_note", None)
 
-    vscode_dir = Path(workspace_path) / ".vscode"
+    workspace_root = Path(workspace_path)
+    vscode_dir = workspace_root / ".vscode"
     mcp_json_path = vscode_dir / "mcp.json"
+
+    # Verifica che workspace_path esista nel filesystem del container.
+    # Se non esiste, la cartella non è nel volume mount → il file verrebbe
+    # scritto nel filesystem interno del container e andrebbe perso.
+    if not workspace_root.exists():
+        folder_name = workspace_root.name
+        return json.dumps({
+            "status": "error",
+            "reason": (
+                f"Il path '{workspace_path}' non esiste nel filesystem del container. "
+                f"La cartella non è inclusa nel volume mount. "
+                f"Usa il path nel formato '/workspaces/<nome-cartella>' "
+                f"(es. '/workspaces/{folder_name}'). "
+                f"Assicurati che il container sia avviato con: "
+                f"-v \"<cartella-progetti-host>:/workspaces\""
+            ),
+            "suggested_path": f"/workspaces/{folder_name}",
+        }, ensure_ascii=False, indent=2)
 
     # Merge non distruttivo con configurazione esistente
     existing: dict = {"servers": {}}

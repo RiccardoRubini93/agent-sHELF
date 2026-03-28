@@ -12,17 +12,62 @@ Copilot Agent Mode  ←→  MCP Server (locale)  ←→  GitHub API  ←→  age
 
 | Tool | Descrizione |
 |---|---|
-| `list_agents` | Lista tutti gli agenti con metadati (id, nome, categoria, descrizione) |
-| `get_agent` | Restituisce system prompt + skills + config MCP per un agente specifico |
+| `list_agents` | Lista tutti gli agenti con metadati (id, name, version, category, description, author) |
+| `get_agent` | Restituisce system prompt + skills disponibili + config MCP per un agente specifico |
 | `get_skill` | Carica una skill extended on-demand durante una sessione attiva |
+| `configure_workspace` | Scrive `.vscode/mcp.json` nel workspace corrente con la config MCP dell'agente |
+
+### `list_agents`
+Restituisce un array JSON con i campi `id`, `name`, `version`, `category`, `description`, `author` per ogni agente. Non include il contenuto dei system prompt o delle skills.
+
+### `get_agent`
+Restituisce un oggetto JSON con:
+- `system_prompt` — contenuto delle skills core concatenate (da iniettare come system prompt)
+- `available_skills` — elenco delle skills extended caricabili on-demand
+- `mcp_servers` — configurazione VSCode-ready dei server MCP esterni richiesti dall'agente
+- `metadata` — id, name, version, category
+
+Se `mcp_servers` non è vuoto, il chiamante deve configurare il server prima di avviare la sessione (vedi workflow per tipo `http` e `stdio` nella docstring del tool).
+
+### `get_skill`
+Carica una skill extended on-demand. `skill_name` è il nome del file senza path e senza `.md` (es. `python-review` per `skills/python-review.md`).
+
+### `configure_workspace`
+Scrive la configurazione MCP dell'agente nel file `.vscode/mcp.json` della cartella di lavoro corrente, evitando la configurazione manuale. Esegue un merge non distruttivo: se il file esiste già, aggiunge solo il nuovo server senza rimuovere quelli presenti. Se `credentials` è fornito, aggiunge `.vscode/mcp.json` al `.gitignore` del workspace per evitare commit accidentali.
+
+**Nota sul `workspace_path`**: il path deve essere nel formato del container (`/workspaces/<nome-cartella>`). Richiede che il container sia avviato con il volume `-v "<cartella-progetti-host>:/workspaces"`.
 
 ## Agenti disponibili
 
-| ID | Nome | Categoria | Descrizione |
-|----|------|-----------|-------------|
-| `code-reviewer` | Code Reviewer | engineering | Revisione codice con focus su qualità, sicurezza e best practice |
-| `looker-analyst` | Looker Analyst | analytics | Analisi dati su Looker con focus su metriche business |
-| `notion-writer` | Notion Writer | writing | Creazione e aggiornamento di pagine Notion con struttura coerente |
+| ID | Nome | Categoria | MCP Server | Descrizione |
+|----|------|-----------|------------|-------------|
+| `code-reviewer` | Code Reviewer | engineering | — | Revisione codice con focus su qualità, sicurezza e best practice |
+| `looker-analyst` | Looker Analyst | analytics | `looker-docker` (stdio) | Analisi dati su Looker con focus su metriche business |
+| `notion-writer` | Notion Writer | writing | `notion` (http) | Creazione e aggiornamento di pagine Notion con struttura coerente |
+
+### code-reviewer
+
+- **Skills core**: `system-prompt.md`
+- **Skills extended**: `python-review`, `security-audit`, `go-patterns`
+- **MCP servers**: nessuno
+
+### looker-analyst
+
+- **Skills core**: `system-prompt.md`
+- **Skills extended**: `looker-usage`, `metrics-guide`
+- **MCP servers**: `looker-docker` (stdio, Docker)
+  - Variabili **obbligatorie**: `LOOKER_CLIENT_ID`, `LOOKER_CLIENT_SECRET`
+  - Variabili opzionali: `LOOKER_BASE_URL` (default: `https://jakala.cloud.looker.com/`), `LOOKER_VERIFY_SSL` (default: `true`)
+  - Immagine Docker richiesta: `looker-mcp-toolbox`
+
+### notion-writer
+
+- **Skills core**: `system-prompt.md`
+- **Skills extended**: `notion-structure`, `writing-style`
+- **MCP servers**: `notion` (http, bearer auth)
+  - Variabili **obbligatorie**: `NOTION_API_KEY`
+  - Endpoint: `https://mcp.notion.com/mcp`
+  - L'autenticazione avviene tramite header `Authorization: Bearer <token>`
 
 ## Struttura della repository
 
@@ -35,16 +80,47 @@ agents/
         └── <skill>.md     # conoscenza specializzata (caricata on-demand)
 
 mcp-server/
-├── main.py                 # entry point FastMCP
-├── pyproject.toml
-├── providers/              # adapter per provider Git
-│   ├── base.py
-│   ├── github.py
-│   └── factory.py
+├── main.py                 # entry point FastMCP; espone app ASGI per uvicorn
+├── pyproject.toml          # dipendenze: fastmcp, httpx, pydantic-settings, uvicorn
+├── Dockerfile              # immagine python:3.11-slim, porta 8000
+├── providers/              # adapter per provider Git (interfaccia astratta + implementazioni)
+│   ├── base.py             # ABC GitProvider (get_file, list_directory)
+│   ├── github.py           # GitHub REST API v2022-11-28 via httpx
+│   └── factory.py          # crea il provider dalla variabile GIT_PROVIDER
 └── tools/                  # logica tool calls separata in moduli
     ├── list_agents.py
-    ├── get_agent.py
-    └── get_skill.py
+    ├── get_agent.py        # include _build_vscode_mcp_config per http e stdio
+    ├── get_skill.py
+    └── configure_workspace.py
+```
+
+### Schema `agent.json`
+
+```jsonc
+{
+  "id": "string",               // corrisponde al nome della cartella
+  "name": "string",             // nome leggibile
+  "version": "string",          // semver
+  "category": "string",         // es. engineering, analytics, writing
+  "description": "string",
+  "author": "string",
+  "skills": {
+    "core": ["system-prompt.md"],          // sempre caricati in get_agent
+    "extended": ["skills/<name>.md"]       // caricabili on-demand con get_skill
+  },
+  "mcp_servers": [              // array vuoto se non richiesti
+    {
+      "name": "string",
+      "type": "http | stdio",
+      "url": "string",          // solo per type: http
+      "auth": { "type": "bearer", "header": "Authorization", "env": "VAR_NAME" },
+      "command": "string",      // solo per type: stdio
+      "args": ["string"],
+      "env_required": ["VAR_NAME"],
+      "env_optional": { "VAR_NAME": "default" }
+    }
+  ]
+}
 ```
 
 ## Setup del MCP Server
@@ -169,10 +245,12 @@ npx @modelcontextprotocol/inspector python -m main
 | Variabile | Richiesta | Default | Descrizione |
 |-----------|-----------|---------|-------------|
 | `GIT_PROVIDER` | No | `github` | Provider Git (attualmente: `github`) |
-| `GITHUB_TOKEN` | Sì | — | Personal Access Token |
+| `GITHUB_TOKEN` | Sì | — | Personal Access Token (scope `contents:read`) |
 | `GITHUB_OWNER` | Sì | — | Username o organizzazione GitHub |
 | `GITHUB_REPO` | Sì | — | Nome della repository |
 | `GITHUB_BRANCH` | No | `main` | Branch da leggere |
+| `HOST` | No | `0.0.0.0` | Host su cui uvicorn ascolta |
+| `PORT` | No | `8000` | Porta su cui uvicorn ascolta |
 
 ## Aggiungere un nuovo agente
 

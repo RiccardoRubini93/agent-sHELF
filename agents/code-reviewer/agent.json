@@ -1,12 +1,13 @@
 {
   "id": "code-reviewer",
   "name": "Code Reviewer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "category": "engineering",
   "description": "Revisione codice con focus su qualità, sicurezza e best practice",
   "author": "team-it",
+  "format": "custom-agent",
   "skills": {
-    "core": ["system-prompt.md"],
+    "core": ["agent.md"],
     "extended": [
       "skills/python-review.md",
       "skills/security-audit.md",

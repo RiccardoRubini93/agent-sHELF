@@ -1,12 +1,13 @@
 {
   "id": "notion-writer",
   "name": "Notion Writer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "category": "writing",
   "description": "Creazione e aggiornamento di pagine Notion con struttura coerente",
   "author": "team-it",
+  "format": "custom-agent",
   "skills": {
-    "core": ["system-prompt.md"],
+    "core": ["agent.md"],
     "extended": [
       "skills/notion-structure.md",
       "skills/writing-style.md"

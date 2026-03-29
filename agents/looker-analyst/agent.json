@@ -1,12 +1,13 @@
 {
   "id": "looker-analyst",
   "name": "Looker Analyst",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "category": "analytics",
   "description": "Analisi dati su Looker con focus su metriche business",
   "author": "team-it",
+  "format": "custom-agent",
   "skills": {
-    "core": ["system-prompt.md"],
+    "core": ["agent.md"],
     "extended": [
       "skills/looker-usage.md",
       "skills/metrics-guide.md"
